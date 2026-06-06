@@ -175,6 +175,14 @@ app.use(async (req, res, next) => {
   }
 });
 
+app.use((req, res, next) => {
+  const serviceRoute = /^\/(auth|staff|students|marks|fees|health)(\/|$)/;
+  if (!req.url.startsWith("/api") && serviceRoute.test(req.url)) {
+    req.url = `/api${req.url}`;
+  }
+  next();
+});
+
 // ─────────────────────────────────────────────
 // AUTH MIDDLEWARE
 // ─────────────────────────────────────────────
