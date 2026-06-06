@@ -11,13 +11,22 @@ const allowedOrigins = [
   process.env.FRONTEND_URL,
   process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null,
 ].filter(Boolean);
+
+function isAllowedOrigin(origin) {
+  if (!origin) return true;
+  if (allowedOrigins.includes(origin)) return true;
+  if (/^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)) return true;
+  if (/^https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(origin)) return true;
+  return false;
+}
+
 app.use(
   cors({
     origin(origin, callback) {
-      if (!origin) return callback(null, true);
-      if (allowedOrigins.includes(origin)) return callback(null, true);
-      if (/^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)) return callback(null, true);
-      return callback(new Error(`CORS blocked for origin ${origin}`));
+      if (isAllowedOrigin(origin)) return callback(null, true);
+      const err = new Error(`CORS blocked for origin ${origin}`);
+      err.statusCode = 403;
+      return callback(err);
     },
     credentials: true,
   })
@@ -186,6 +195,9 @@ function requireRole(...roles) {
 // ─────────────────────────────────────────────
 app.post("/api/auth/login", async (req, res) => {
   try {
+    if (!process.env.JWT_SECRET) {
+      return res.status(500).json({ error: "JWT_SECRET is not set in deployment environment variables" });
+    }
     const { username, password } = req.body;
     const user = await Staff.findOne({ username: (username||"").toLowerCase().trim() });
     if (!user || !await bcrypt.compare(password, user.password))
@@ -413,7 +425,14 @@ app.get("/api/health", (_, res) => res.json({ status: "ok", school: "Hlalele Hig
 app.use((err, req, res, next) => {
   console.error("Unhandled API error:", err);
   if (res.headersSent) return next(err);
-  res.status(500).json({ error: "Internal server error" });
+  const status = err.statusCode || 500;
+  const message =
+    status === 403
+      ? err.message
+      : process.env.NODE_ENV === "production"
+        ? "Internal server error"
+        : formatMongoStartupError(err);
+  res.status(status).json({ error: message });
 });
 
 const PORT = process.env.PORT || 5000;
