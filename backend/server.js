@@ -7,12 +7,15 @@ const cors     = require("cors");
 
 const app = express();
 app.use(express.json());
-const allowedOrigin = process.env.FRONTEND_URL || null;
+const allowedOrigins = [
+  process.env.FRONTEND_URL,
+  process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null,
+].filter(Boolean);
 app.use(
   cors({
     origin(origin, callback) {
       if (!origin) return callback(null, true);
-      if (allowedOrigin && origin === allowedOrigin) return callback(null, true);
+      if (allowedOrigins.includes(origin)) return callback(null, true);
       if (/^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)) return callback(null, true);
       return callback(new Error(`CORS blocked for origin ${origin}`));
     },
@@ -26,6 +29,11 @@ app.use(
 async function connectDatabase() {
   if (!process.env.MONGODB_URI) {
     throw new Error("MONGODB_URI is not set");
+  }
+  if (mongoose.connection.readyState === 1) return;
+  if (mongoose.connection.readyState === 2) {
+    await mongoose.connection.asPromise();
+    return;
   }
   await mongoose.connect(process.env.MONGODB_URI);
   console.log("MongoDB connected");
@@ -119,6 +127,44 @@ async function seedDefaults() {
   ]);
   console.log("Default accounts created (password: hlalele2024)");
 }
+
+let databaseReadyPromise;
+
+async function prepareDatabase() {
+  await connectDatabase();
+  await Fee.updateMany(
+    { $or: [{ mpesaRef: null }, { mpesaRef: "" }] },
+    { $unset: { mpesaRef: "" } }
+  );
+  try {
+    await Fee.collection.dropIndex("mpesaRef_1");
+  } catch (err) {
+    if (!err || (err.codeName !== "IndexNotFound" && err.code !== 27)) {
+      console.warn("Could not drop legacy mpesaRef index:", err.message || err);
+    }
+  }
+  await Fee.syncIndexes();
+  await seedDefaults();
+}
+
+function ensureDatabaseReady() {
+  if (!databaseReadyPromise) {
+    databaseReadyPromise = prepareDatabase().catch((err) => {
+      databaseReadyPromise = null;
+      throw err;
+    });
+  }
+  return databaseReadyPromise;
+}
+
+app.use(async (req, res, next) => {
+  try {
+    await ensureDatabaseReady();
+    next();
+  } catch (err) {
+    next(err);
+  }
+});
 
 // ─────────────────────────────────────────────
 // AUTH MIDDLEWARE
@@ -373,24 +419,15 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 5000;
 
 async function bootstrap() {
-  await connectDatabase();
-  await Fee.updateMany(
-    { $or: [{ mpesaRef: null }, { mpesaRef: "" }] },
-    { $unset: { mpesaRef: "" } }
-  );
-  try {
-    await Fee.collection.dropIndex("mpesaRef_1");
-  } catch (err) {
-    if (!err || (err.codeName !== "IndexNotFound" && err.code !== 27)) {
-      console.warn("Could not drop legacy mpesaRef index:", err.message || err);
-    }
-  }
-  await Fee.syncIndexes();
-  await seedDefaults();
+  await ensureDatabaseReady();
   app.listen(PORT, () => console.log(`Hlalele API on port ${PORT}`));
 }
 
-bootstrap().catch(err => {
-  console.error("❌ Fatal startup error:", formatMongoStartupError(err));
-  process.exit(1);
-});
+if (require.main === module) {
+  bootstrap().catch(err => {
+    console.error("Fatal startup error:", formatMongoStartupError(err));
+    process.exit(1);
+  });
+}
+
+module.exports = app;

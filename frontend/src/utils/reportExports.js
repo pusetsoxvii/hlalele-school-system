@@ -265,8 +265,10 @@ export function buildClassCsv(classRows, subjectAvgs, classFeeSummary, grade, cl
 }
 
 export async function downloadStudentPdf(data, remarks, includeFees = true) {
-  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+  const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'landscape' });
   const logo = await loadImageAsDataUrl('/logo/logo.jpeg').catch(() => null);
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
 
   if (logo) doc.addImage(logo, 'JPEG', 14, 12, 18, 18);
   doc.setFont('helvetica', 'bold');
@@ -281,7 +283,9 @@ export async function downloadStudentPdf(data, remarks, includeFees = true) {
 
   autoTable(doc, {
     startY: 56,
-    head: [['Subject', 'CA1', 'CA2', 'CA3', 'CA4', 'CA5', 'CA Avg (30%)', 'CA Teacher', 'Test (70%)', 'Test Teacher', 'Final', 'Class Avg', 'Highest', 'Grade', 'Remarks']],
+    margin: { left: 10, right: 10 },
+    tableWidth: 'wrap',
+    head: [['Subject', 'CA1', 'CA2', 'CA3', 'CA4', 'CA5', 'CA Avg', 'CA Teacher', 'Test', 'Test Teacher', 'Final', 'Class Avg', 'Highest', 'Grade', 'Remarks']],
     body: data.subjectRows.map((row) => [
       row.subject,
       ...(row.caSlots || []).map((v) => (v != null ? `${v}%` : '—')),
@@ -295,9 +299,38 @@ export async function downloadStudentPdf(data, remarks, includeFees = true) {
       row.final != null ? row.grade : '—',
       row.remark,
     ]),
-    styles: { fontSize: 8, cellPadding: 2 },
-    headStyles: { fillColor: [107, 62, 38] },
-    columnStyles: { 0: { cellWidth: 22 }, 7: { cellWidth: 20 }, 9: { cellWidth: 20 }, 14: { cellWidth: 34 } },
+    styles: {
+      fontSize: 7.2,
+      cellPadding: 1.4,
+      overflow: 'linebreak',
+      valign: 'middle',
+      lineWidth: 0.1,
+    },
+    headStyles: {
+      fillColor: [107, 62, 38],
+      fontSize: 6.8,
+      halign: 'center',
+      valign: 'middle',
+      overflow: 'linebreak',
+    },
+    bodyStyles: { minCellHeight: 6 },
+    columnStyles: {
+      0: { cellWidth: 28, halign: 'left' },
+      1: { cellWidth: 10, halign: 'center' },
+      2: { cellWidth: 10, halign: 'center' },
+      3: { cellWidth: 10, halign: 'center' },
+      4: { cellWidth: 10, halign: 'center' },
+      5: { cellWidth: 10, halign: 'center' },
+      6: { cellWidth: 16, halign: 'center' },
+      7: { cellWidth: 24, halign: 'left' },
+      8: { cellWidth: 14, halign: 'center' },
+      9: { cellWidth: 24, halign: 'left' },
+      10: { cellWidth: 14, halign: 'center' },
+      11: { cellWidth: 16, halign: 'center' },
+      12: { cellWidth: 14, halign: 'center' },
+      13: { cellWidth: 10, halign: 'center' },
+      14: { cellWidth: 37, halign: 'left' },
+    },
   });
 
   const summaryY = doc.lastAutoTable.finalY + 8;
@@ -313,6 +346,7 @@ export async function downloadStudentPdf(data, remarks, includeFees = true) {
 
   autoTable(doc, {
     startY: summaryY,
+    margin: { left: 10, right: pageWidth - 90 },
     head: [['Summary', 'Value']],
     body: summaryItems,
     styles: { fontSize: 8, cellPadding: 2 },
@@ -333,14 +367,17 @@ export async function downloadStudentPdf(data, remarks, includeFees = true) {
     doc.setFont('helvetica', 'bold');
     doc.text(`${label}:`, 14, cursorY);
     doc.setFont('helvetica', 'normal');
-    const lines = doc.splitTextToSize(value, 175);
+    const lines = doc.splitTextToSize(value, pageWidth - 28);
     doc.text(lines, 14, cursorY + 5);
     cursorY += 5 + lines.length * 4 + 3;
   });
 
   doc.setFontSize(10);
-  doc.text('Class Teacher Signature ____________________', 14, 270);
-  doc.text('Principal Signature ____________________', 110, 270);
+  if (cursorY > pageHeight - 24) {
+    doc.addPage();
+  }
+  doc.text('Class Teacher Signature ____________________', 14, pageHeight - 14);
+  doc.text('Principal Signature ____________________', pageWidth / 2, pageHeight - 14);
 
   doc.save(`${data.student.name.replace(/\s+/g, '_')}_${data.term.replace(/\s+/g, '_')}.pdf`);
 }
